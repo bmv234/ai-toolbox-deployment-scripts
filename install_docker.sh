@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Determine if running as root
-if [ "$EUID" -eq 0 ]; then
+if [ "$(id -u)" = "0" ]; then
     # If root, use /var/log
     LOG_DIR="/var/log/docker-install"
     # Create log directory with appropriate permissions
@@ -16,7 +16,7 @@ LOG_FILE="$LOG_DIR/docker_install_$(date +%Y%m%d_%H%M%S).log"
 touch "$LOG_FILE"
 
 # Set appropriate permissions for log file
-if [ "$EUID" -eq 0 ]; then
+if [ "$(id -u)" = "0" ]; then
     chown root:adm "$LOG_FILE"
     chmod 644 "$LOG_FILE"
 fi
@@ -37,7 +37,7 @@ set -e
 # Get the actual username even if running as root
 ACTUAL_USER=${SUDO_USER:-$USER}
 
-log_message "Starting Docker installation for Ubuntu 24.04..."
+log_message "Starting Docker installation..."
 
 # Update package lists
 log_message "Updating package lists..."
@@ -82,7 +82,7 @@ sudo systemctl enable docker 2>&1 | tee -a "$LOG_FILE"
 if ! groups $ACTUAL_USER | grep -q docker; then
     log_message "Adding user $ACTUAL_USER to docker group..."
     usermod -aG docker $ACTUAL_USER
-    if [ "$EUID" -ne 0 ]; then
+    if [ "$(id -u)" != "0" ]; then
         # Only reinitialize shell session if not running as root
         log_message "Reinitializing shell session..."
         exec sg docker "$0"
