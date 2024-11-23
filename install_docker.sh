@@ -3,6 +3,13 @@
 # Exit on any error
 set -e
 
+# Check if we are in the docker group
+if ! groups | grep -q docker; then
+    echo "Adding current user to docker group and reinitializing shell session..."
+    sudo usermod -aG docker $USER
+    exec sg docker "$0"
+fi
+
 echo "Starting Docker installation for Ubuntu 24.04..."
 
 # Update package lists
@@ -39,9 +46,10 @@ sudo apt-get update
 echo "Installing Docker Engine..."
 sudo apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
 
-# Add current user to docker group
-echo "Adding current user to docker group..."
-sudo usermod -aG docker $USER
+# Start and enable Docker service
+echo "Starting and enabling Docker service..."
+sudo systemctl start docker
+sudo systemctl enable docker
 
 # Check for NVIDIA GPU
 echo "Checking for NVIDIA GPU..."
@@ -73,6 +81,13 @@ if lspci | grep -i nvidia > /dev/null; then
     echo "You can verify the installation by running: sudo docker run --rm --gpus all nvidia/cuda:11.0.3-base-ubuntu20.04 nvidia-smi"
 else
     echo "No NVIDIA GPU detected. Skipping NVIDIA Container Toolkit installation."
+fi
+
+# Verify docker permissions
+echo "Verifying Docker permissions..."
+if ! docker info >/dev/null 2>&1; then
+    echo "Error: Failed to connect to Docker daemon"
+    exit 1
 fi
 
 # Install Ollama using Docker
@@ -162,15 +177,13 @@ else
 fi
 
 echo "Installation completed!"
-echo "- Docker has been installed successfully"
-echo "- Please log out and log back in for Docker group changes to take effect"
+echo "- Docker has been installed and configured successfully"
+echo "- Docker permissions have been set up for current session"
 echo "- You can verify Docker installation by running: docker --version"
 if lspci | grep -i nvidia > /dev/null; then
     echo "- NVIDIA Container Toolkit has been installed"
     echo "- You can verify NVIDIA toolkit by running: sudo docker run --rm --gpus all nvidia/cuda:11.0.3-base-ubuntu20.04 nvidia-smi"
 fi
-echo "- Ollama has been installed and is running in Docker on port: 11434"
-echo "- You can start using Ollama directly with: ollama run llama2"
+echo "- Ollama has been installed and is running in Docker at: http://localhost:11434"
 echo "- Open WebUI is installed and running at: http://localhost:$WEBUI_PORT"
-echo "- Or access the web interface at: http://localhost:$WEBUI_PORT"
-
+echo "- You can start using Ollama through the web interface at: http://localhost:$WEBUI_PORT"
