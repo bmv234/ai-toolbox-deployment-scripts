@@ -75,13 +75,21 @@ else
     echo "No NVIDIA GPU detected. Skipping NVIDIA Container Toolkit installation."
 fi
 
-# Install Ollama
-echo "Installing Ollama..."
-curl -fsSL https://ollama.com/install.sh | sh
+# Install Ollama using Docker
+echo "Installing Ollama using Docker..."
 
-# Start Ollama service
-echo "Starting Ollama service..."
-systemctl start ollama
+# Pull Ollama image
+echo "Pulling Ollama Docker image..."
+docker pull ollama/ollama
+
+# Start Ollama container
+echo "Starting Ollama container..."
+docker run -d \
+    --name ollama \
+    -v ollama:/root/.ollama \
+    -p 11434:11434 \
+    --restart always \
+    ollama/ollama
 
 # Wait for Ollama to be ready
 echo "Waiting for Ollama to be ready..."
@@ -161,7 +169,8 @@ if lspci | grep -i nvidia > /dev/null; then
     echo "- NVIDIA Container Toolkit has been installed"
     echo "- You can verify NVIDIA toolkit by running: sudo docker run --rm --gpus all nvidia/cuda:11.0.3-base-ubuntu20.04 nvidia-smi"
 fi
-echo "- Ollama has been installed and is running"
-echo "- Open WebUI is installed and running at: http://localhost:$WEBUI_PORT"
+echo "- Ollama has been installed and is running in Docker on port: 11434"
 echo "- You can start using Ollama directly with: ollama run llama2"
+echo "- Open WebUI is installed and running at: http://localhost:$WEBUI_PORT"
 echo "- Or access the web interface at: http://localhost:$WEBUI_PORT"
+
