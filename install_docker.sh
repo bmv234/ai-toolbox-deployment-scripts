@@ -37,17 +37,6 @@ set -e
 # Get the actual username even if running as root
 ACTUAL_USER=${SUDO_USER:-$USER}
 
-# Check docker group membership and add if needed
-if ! groups $ACTUAL_USER | grep -q docker; then
-    log_message "Adding user $ACTUAL_USER to docker group..."
-    usermod -aG docker $ACTUAL_USER
-    if [ "$EUID" -ne 0 ]; then
-        # Only reinitialize shell session if not running as root
-        log_message "Reinitializing shell session..."
-        exec sg docker "$0"
-    fi
-fi
-
 log_message "Starting Docker installation for Ubuntu 24.04..."
 
 # Update package lists
@@ -88,6 +77,17 @@ sudo apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plug
 log_message "Starting and enabling Docker service..."
 sudo systemctl start docker 2>&1 | tee -a "$LOG_FILE"
 sudo systemctl enable docker 2>&1 | tee -a "$LOG_FILE"
+
+# Now that Docker is installed, check docker group membership and add if needed
+if ! groups $ACTUAL_USER | grep -q docker; then
+    log_message "Adding user $ACTUAL_USER to docker group..."
+    usermod -aG docker $ACTUAL_USER
+    if [ "$EUID" -ne 0 ]; then
+        # Only reinitialize shell session if not running as root
+        log_message "Reinitializing shell session..."
+        exec sg docker "$0"
+    fi
+fi
 
 # Check for NVIDIA GPU
 log_message "Checking for NVIDIA GPU..."
