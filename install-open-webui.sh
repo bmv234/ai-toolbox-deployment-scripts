@@ -106,30 +106,51 @@ if lspci | grep -i nvidia > /dev/null; then
     log_message "NVIDIA Container Toolkit installation completed!"
 fi
 
+# Create systemd service file for Ollama
+log_message "Creating Ollama systemd service..."
+cat > /etc/systemd/system/ollama.service << EOF
+[Unit]
+Description=Ollama AI Service
+After=docker.service
+Requires=docker.service
+
+[Service]
+ExecStartPre=-/usr/bin/docker rm -f ollama
+ExecStart=/usr/bin/docker run --rm --name ollama -v ollama:/root/.ollama -p 11434:11434 ollama/ollama
+ExecStop=/usr/bin/docker stop ollama
+Restart=always
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+# Create systemd service file for Open WebUI
+log_message "Creating Open WebUI systemd service..."
+cat > /etc/systemd/system/open-webui.service << EOF
+[Unit]
+Description=Open WebUI Service
+After=ollama.service
+Requires=ollama.service
+
+[Service]
+ExecStartPre=-/usr/bin/docker rm -f open-webui
+ExecStart=/usr/bin/docker run --rm --name open-webui -p 3000:8080 --add-host=host.docker.internal:host-gateway -v open-webui:/app/backend/data -e OLLAMA_BASE_URL=http://host.docker.internal:11434 ghcr.io/open-webui/open-webui:cuda
+ExecStop=/usr/bin/docker stop open-webui
+Restart=always
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
 # Pull Docker images
 log_message "Pulling required Docker images..."
 docker pull ollama/ollama 2>&1 | tee -a "$LOG_FILE"
 docker pull ghcr.io/open-webui/open-webui:cuda 2>&1 | tee -a "$LOG_FILE"
 
-# Create Ollama container
-log_message "Creating Ollama container..."
-docker create \
-    --name ollama \
-    --restart always \
-    -v ollama:/root/.ollama \
-    -p 11434:11434 \
-    ollama/ollama 2>&1 | tee -a "$LOG_FILE"
-
-# Create Open WebUI container
-log_message "Creating Open WebUI container..."
-docker create \
-    --name open-webui \
-    --restart always \
-    -p 3000:8080 \
-    --add-host=host.docker.internal:host-gateway \
-    -v open-webui:/app/backend/data \
-    -e OLLAMA_BASE_URL=http://host.docker.internal:11434 \
-    ghcr.io/open-webui/open-webui:cuda 2>&1 | tee -a "$LOG_FILE"
+# Enable services to start on boot
+log_message "Enabling services to start on boot..."
+systemctl enable ollama.service 2>&1 | tee -a "$LOG_FILE"
+systemctl enable open-webui.service 2>&1 | tee -a "$LOG_FILE"
 
 log_message "Installation completed!"
 log_message "The following has been set up:"
@@ -138,10 +159,11 @@ log_message "- Docker permissions configured for user $ACTUAL_USER"
 if lspci | grep -i nvidia > /dev/null; then
     log_message "- NVIDIA Container Toolkit installed and configured"
 fi
-log_message "- Ollama container created with auto-restart"
-log_message "- Open WebUI container created with auto-restart"
+log_message "- Ollama service created and enabled"
+log_message "- Open WebUI service created and enabled"
+log_message "- All services will start automatically after reboot"
 log_message "- After reboot, Ollama will be available at: http://localhost:11434"
 log_message "- After reboot, Open WebUI will be available at: http://localhost:3000"
 
 log_message "Installation log has been saved to: $LOG_FILE"
-log_message "Please reboot the system to start the containers."
+log_message "Please reboot the system to start all services."
