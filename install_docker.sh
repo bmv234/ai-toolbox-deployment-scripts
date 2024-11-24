@@ -17,29 +17,13 @@ log_message() {
 
 log_message "Starting Docker installation in cloud-init environment"
 
-# Detect the default user
-# First try to get it from cloud-init
-if [ -f /run/cloud-init/cloud-init-run-module-once.lock ]; then
-    DEFAULT_USER=$(grep -oP 'default_username: \K.*' /etc/cloud/cloud.cfg 2>/dev/null || true)
+# Get username from cloud-init nocloud data - try both locations
+if DEFAULT_USER=$(grep -r "username:" /target/cdrom/nocloud/ 2>/dev/null | cut -d':' -f3 | xargs) || \
+   DEFAULT_USER=$(grep -r "username:" /cdrom/nocloud/ 2>/dev/null | cut -d':' -f3 | xargs); then
+    log_message "Detected username from cloud-init: $DEFAULT_USER"
+else
+    log_message "Warning: Could not detect username from cloud-init data"
 fi
-
-# If not found in cloud-init, try to find the first non-root user with home directory
-if [ -z "$DEFAULT_USER" ]; then
-    DEFAULT_USER=$(awk -F: '$3 >= 1000 && $3 != 65534 {print $1}' /etc/passwd | head -n 1)
-fi
-
-# If still not found, look for any user with sudo privileges
-if [ -z "$DEFAULT_USER" ]; then
-    DEFAULT_USER=$(getent group sudo | cut -d: -f4 | tr ',' '\n' | head -n 1)
-fi
-
-# Verify we found a user
-if [ -z "$DEFAULT_USER" ]; then
-    log_message "Error: Could not detect default user. Please specify user manually."
-    exit 1
-fi
-
-log_message "Detected default user: $DEFAULT_USER"
 
 # Update package lists
 log_message "Updating package lists..."
@@ -79,10 +63,14 @@ apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin do
 log_message "Enabling Docker service..."
 systemctl enable docker 2>&1 | tee -a "$LOG_FILE"
 
-# Create docker group and add default user
-log_message "Setting up docker group for $DEFAULT_USER..."
+# Create docker group and add default user if found
 groupadd -f docker
-usermod -aG docker "$DEFAULT_USER"
+if [ -n "$DEFAULT_USER" ]; then
+    log_message "Setting up docker group for $DEFAULT_USER..."
+    usermod -aG docker "$DEFAULT_USER"
+else
+    log_message "Skipping docker group user setup as no username was detected"
+fi
 
 # Set up Docker daemon configuration
 log_message "Configuring Docker daemon..."
@@ -150,7 +138,9 @@ chmod 666 /var/run/docker.sock
 log_message "Installation completed!"
 log_message "The following has been set up:"
 log_message "- Docker Engine installed and enabled"
-log_message "- Docker configured for user: $DEFAULT_USER"
+if [ -n "$DEFAULT_USER" ]; then
+    log_message "- Docker configured for user: $DEFAULT_USER"
+fi
 log_message "- Docker images pulled"
 log_message "- Containers created with auto-restart policy"
 if lspci | grep -i nvidia > /dev/null; then
@@ -161,6 +151,8 @@ log_message "After system boot:"
 log_message "- Containers will start automatically"
 log_message "- Ollama will be available at: http://localhost:11434"
 log_message "- Open WebUI will be available at: http://localhost:3000"
-log_message "- User $DEFAULT_USER will have Docker permissions"
+if [ -n "$DEFAULT_USER" ]; then
+    log_message "- User $DEFAULT_USER will have Docker permissions"
+fi
 
 log_message "Installation log has been saved to: $LOG_FILE"
