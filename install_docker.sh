@@ -1,40 +1,33 @@
 #!/bin/bash
 
-# Determine if running as root
-if [ "$(id -u)" = "0" ]; then
-    # If root, use /var/log
-    LOG_DIR="/var/log/docker-install"
-    # Create log directory with appropriate permissions
-    mkdir -p "$LOG_DIR"
-    chmod 755 "$LOG_DIR"
-else
-    # If regular user, use current directory
-    LOG_DIR="$(pwd)"
-fi
+# Set up logging
+LOG_DIR="/var/log/docker-install"
+mkdir -p "$LOG_DIR"
+chmod 755 "$LOG_DIR"
 
 LOG_FILE="$LOG_DIR/docker_install_$(date +%Y%m%d_%H%M%S).log"
 touch "$LOG_FILE"
+chown root:adm "$LOG_FILE"
+chmod 644 "$LOG_FILE"
 
-# Set appropriate permissions for log file
-if [ "$(id -u)" = "0" ]; then
-    chown root:adm "$LOG_FILE"
-    chmod 644 "$LOG_FILE"
-fi
-
-# Function to log messages to both console and log file
+# Function to log messages
 log_message() {
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1" | tee -a "$LOG_FILE"
 }
 
-log_message "Starting Docker installation"
-log_message "Installation directory: $(pwd)"
-log_message "Log file location: $LOG_FILE"
-log_message "Running as user: $(whoami)"
+log_message "Starting Docker installation in cloud-init environment"
 
-# Get the actual username even if running as root
-ACTUAL_USER=${SUDO_USER:-$USER}
+# Get the actual user running the script
+ACTUAL_USER=$(who am i | awk '{print $1}')
+log_message "Detected actual user running the script: $ACTUAL_USER"
 
-log_message "Starting Docker installation..."
+# Get username from cloud-init nocloud data - try both locations
+if DEFAULT_USER=$(grep -r "username:" /target/cdrom/nocloud/ 2>/dev/null | cut -d':' -f3 | xargs) || \
+   DEFAULT_USER=$(grep -r "username:" /cdrom/nocloud/ 2>/dev/null | cut -d':' -f3 | xargs); then
+    log_message "Detected username from cloud-init: $DEFAULT_USER"
+else
+    log_message "Warning: Could not detect username from cloud-init data"
+fi
 
 # Update package lists
 log_message "Updating package lists..."
@@ -70,15 +63,33 @@ apt-get update 2>&1 | tee -a "$LOG_FILE"
 log_message "Installing Docker Engine..."
 apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin 2>&1 | tee -a "$LOG_FILE"
 
-# Enable Docker service to start on boot
+# Enable Docker service
 log_message "Enabling Docker service..."
 systemctl enable docker 2>&1 | tee -a "$LOG_FILE"
+systemctl start docker 2>&1 | tee -a "$LOG_FILE"
 
-# Add user to docker group
-if ! groups $ACTUAL_USER | grep -q docker; then
-    log_message "Adding user $ACTUAL_USER to docker group..."
-    usermod -aG docker $ACTUAL_USER
+# Create docker group and add users
+groupadd -f docker
+if [ -n "$DEFAULT_USER" ]; then
+    log_message "Setting up docker group for cloud-init user: $DEFAULT_USER..."
+    usermod -aG docker "$DEFAULT_USER"
 fi
+if [ -n "$ACTUAL_USER" ]; then
+    log_message "Setting up docker group for actual user: $ACTUAL_USER..."
+    usermod -aG docker "$ACTUAL_USER"
+fi
+
+# Set up Docker daemon configuration
+log_message "Configuring Docker daemon..."
+mkdir -p /etc/docker
+cat > /etc/docker/daemon.json << EOF
+{
+    "log-driver": "json-file",
+    "log-opts": {
+        "max-size": "100m"
+    }
+}
+EOF
 
 # Check for NVIDIA GPU
 log_message "Checking for NVIDIA GPU..."
@@ -102,68 +113,57 @@ if lspci | grep -i nvidia > /dev/null; then
 
     # Configure Docker daemon to use NVIDIA Container Toolkit
     nvidia-ctk runtime configure --runtime=docker 2>&1 | tee -a "$LOG_FILE"
-
-    log_message "NVIDIA Container Toolkit installation completed!"
 fi
-
-# Create systemd service file for Ollama
-log_message "Creating Ollama systemd service..."
-cat > /etc/systemd/system/ollama.service << EOF
-[Unit]
-Description=Ollama AI Service
-After=docker.service
-Requires=docker.service
-
-[Service]
-ExecStartPre=-/usr/bin/docker rm -f ollama
-ExecStart=/usr/bin/docker run --rm --name ollama -v ollama:/root/.ollama -p 11434:11434 ollama/ollama
-ExecStop=/usr/bin/docker stop ollama
-Restart=always
-
-[Install]
-WantedBy=multi-user.target
-EOF
-
-# Create systemd service file for Open WebUI
-log_message "Creating Open WebUI systemd service..."
-cat > /etc/systemd/system/open-webui.service << EOF
-[Unit]
-Description=Open WebUI Service
-After=ollama.service
-Requires=ollama.service
-
-[Service]
-ExecStartPre=-/usr/bin/docker rm -f open-webui
-ExecStart=/usr/bin/docker run --rm --name open-webui -p 3000:8080 --add-host=host.docker.internal:host-gateway -v open-webui:/app/backend/data -e OLLAMA_BASE_URL=http://host.docker.internal:11434 ghcr.io/open-webui/open-webui:cuda
-ExecStop=/usr/bin/docker stop open-webui
-Restart=always
-
-[Install]
-WantedBy=multi-user.target
-EOF
 
 # Pull Docker images
 log_message "Pulling required Docker images..."
 docker pull ollama/ollama 2>&1 | tee -a "$LOG_FILE"
 docker pull ghcr.io/open-webui/open-webui:cuda 2>&1 | tee -a "$LOG_FILE"
 
-# Enable services to start on boot
-log_message "Enabling services to start on boot..."
-systemctl enable ollama.service 2>&1 | tee -a "$LOG_FILE"
-systemctl enable open-webui.service 2>&1 | tee -a "$LOG_FILE"
+# Create and start containers
+log_message "Creating and starting containers..."
+docker create \
+    --name ollama \
+    --restart always \
+    -v ollama:/root/.ollama \
+    -p 11434:11434 \
+    ollama/ollama 2>&1 | tee -a "$LOG_FILE"
+
+docker create \
+    --name open-webui \
+    --restart always \
+    -p 3000:8080 \
+    --add-host=host.docker.internal:host-gateway \
+    -v open-webui:/app/backend/data \
+    -e OLLAMA_BASE_URL=http://host.docker.internal:11434 \
+    ghcr.io/open-webui/open-webui:cuda 2>&1 | tee -a "$LOG_FILE"
+
+# Start the containers
+log_message "Starting containers..."
+docker start ollama 2>&1 | tee -a "$LOG_FILE"
+docker start open-webui 2>&1 | tee -a "$LOG_FILE"
+
+# Set proper permissions for Docker socket
+log_message "Setting Docker socket permissions..."
+chmod 666 /var/run/docker.sock
 
 log_message "Installation completed!"
 log_message "The following has been set up:"
 log_message "- Docker Engine installed and enabled"
-log_message "- Docker permissions configured for user $ACTUAL_USER"
+if [ -n "$DEFAULT_USER" ]; then
+    log_message "- Docker configured for cloud-init user: $DEFAULT_USER"
+fi
+if [ -n "$ACTUAL_USER" ]; then
+    log_message "- Docker configured for actual user: $ACTUAL_USER"
+fi
+log_message "- Docker images pulled"
+log_message "- Containers created and started"
 if lspci | grep -i nvidia > /dev/null; then
     log_message "- NVIDIA Container Toolkit installed and configured"
 fi
-log_message "- Ollama service created and enabled"
-log_message "- Open WebUI service created and enabled"
-log_message "- All services will start automatically after reboot"
-log_message "- After reboot, Ollama will be available at: http://localhost:11434"
-log_message "- After reboot, Open WebUI will be available at: http://localhost:3000"
+
+log_message "Services are now running:"
+log_message "- Ollama is available at: http://localhost:11434"
+log_message "- Open WebUI is available at: http://localhost:3000"
 
 log_message "Installation log has been saved to: $LOG_FILE"
-log_message "Please reboot the system to start all services."
