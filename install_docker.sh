@@ -121,11 +121,11 @@ apt-get install -y git 2>&1 | tee -a "$LOG_FILE"
 
 # Clone the repository
 log_message "Cloning AI toolbox deployment repository..."
-git clone https://github.com/bmv234/ai-toolbox-container-deployment.git . 2>&1 | tee -a "$LOG_FILE"
+git clone https://github.com/bmv234/ai-toolbox-container-deployment.git 2>&1 | tee -a "$LOG_FILE"
 
 # Start dockge using docker compose
 log_message "Starting dockge service..."
-cd dockge && docker compose up -d 2>&1 | tee -a "$LOG_FILE"
+cd ai-toolbox-container-deployment/dockge && docker compose up -d 2>&1 | tee -a "$LOG_FILE"
 
 # Set proper permissions for Docker socket
 log_message "Setting Docker socket permissions..."
