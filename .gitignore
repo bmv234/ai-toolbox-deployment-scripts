@@ -1,0 +1,4 @@
+# Ignore folders pulled from ai-toolbox-container-deployment
+dockge/
+scripts/
+stacks/

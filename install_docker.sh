@@ -115,33 +115,17 @@ if lspci | grep -i nvidia > /dev/null; then
     nvidia-ctk runtime configure --runtime=docker 2>&1 | tee -a "$LOG_FILE"
 fi
 
-# Pull Docker images
-log_message "Pulling required Docker images..."
-docker pull ollama/ollama 2>&1 | tee -a "$LOG_FILE"
-docker pull ghcr.io/open-webui/open-webui:cuda 2>&1 | tee -a "$LOG_FILE"
+# Install git if not already installed
+log_message "Installing git..."
+apt-get install -y git 2>&1 | tee -a "$LOG_FILE"
 
-# Create and start containers
-log_message "Creating and starting containers..."
-docker create \
-    --name ollama \
-    --restart always \
-    -v ollama:/root/.ollama \
-    -p 11434:11434 \
-    ollama/ollama 2>&1 | tee -a "$LOG_FILE"
+# Clone the repository
+log_message "Cloning AI toolbox deployment repository..."
+git clone https://github.com/bmv234/ai-toolbox-container-deployment.git . 2>&1 | tee -a "$LOG_FILE"
 
-docker create \
-    --name open-webui \
-    --restart always \
-    -p 3000:8080 \
-    --add-host=host.docker.internal:host-gateway \
-    -v open-webui:/app/backend/data \
-    -e OLLAMA_BASE_URL=http://host.docker.internal:11434 \
-    ghcr.io/open-webui/open-webui:cuda 2>&1 | tee -a "$LOG_FILE"
-
-# Start the containers
-log_message "Starting containers..."
-docker start ollama 2>&1 | tee -a "$LOG_FILE"
-docker start open-webui 2>&1 | tee -a "$LOG_FILE"
+# Start dockge using docker compose
+log_message "Starting dockge service..."
+cd dockge && docker compose up -d 2>&1 | tee -a "$LOG_FILE"
 
 # Set proper permissions for Docker socket
 log_message "Setting Docker socket permissions..."
@@ -156,14 +140,14 @@ fi
 if [ -n "$ACTUAL_USER" ]; then
     log_message "- Docker configured for actual user: $ACTUAL_USER"
 fi
-log_message "- Docker images pulled"
-log_message "- Containers created and started"
 if lspci | grep -i nvidia > /dev/null; then
     log_message "- NVIDIA Container Toolkit installed and configured"
 fi
+log_message "- AI toolbox deployment repository cloned"
+log_message "- Dockge service started"
 
 log_message "Services are now running:"
-log_message "- Ollama is available at: http://localhost:11434"
-log_message "- Open WebUI is available at: http://localhost:3000"
+log_message "- Dockge UI is available at: http://localhost:5001"
+log_message "- Use Dockge to manage other services like Ollama and Open WebUI"
 
 log_message "Installation log has been saved to: $LOG_FILE"
