@@ -96,8 +96,18 @@ log_message "Checking for NVIDIA GPU..."
 if lspci | grep -i nvidia > /dev/null; then
     log_message "NVIDIA GPU detected. Installing NVIDIA Container Toolkit..."
     
-    # Install required packages
-    apt-get install -y nvidia-driver-535 2>&1 | tee -a "$LOG_FILE"
+    # Download and install CUDA keyring
+    log_message "Installing CUDA keyring..."
+    wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2404/x86_64/cuda-keyring_1.1-1_all.deb 2>&1 | tee -a "$LOG_FILE"
+    dpkg -i cuda-keyring_1.1-1_all.deb 2>&1 | tee -a "$LOG_FILE"
+    rm cuda-keyring_1.1-1_all.deb 2>&1 | tee -a "$LOG_FILE"
+
+    # Update package lists with CUDA repository
+    apt-get update 2>&1 | tee -a "$LOG_FILE"
+
+    # Install NVIDIA driver and CUDA toolkit
+    log_message "Installing NVIDIA driver and CUDA toolkit..."
+    apt-get install -y nvidia-driver-565 cuda-toolkit 2>&1 | tee -a "$LOG_FILE"
 
     # Add the NVIDIA Container Toolkit repository
     curl -fsSL https://nvidia.github.io/libnvidia-container/gpgkey | gpg --dearmor -o /usr/share/keyrings/nvidia-container-toolkit-keyring.gpg 2>&1 | tee -a "$LOG_FILE"
@@ -146,8 +156,13 @@ fi
 log_message "- AI toolbox deployment repository cloned"
 log_message "- Dockge service started"
 
-log_message "Services are now running:"
-log_message "- Dockge UI is available at: http://localhost:5001"
+log_message "Installation completed! System will now reboot to complete NVIDIA driver setup."
+log_message "After reboot:"
+log_message "- Dockge UI will be available at: http://localhost:5001"
 log_message "- Use Dockge to manage other services like Ollama and Open WebUI"
 
 log_message "Installation log has been saved to: $LOG_FILE"
+
+# Reboot the system
+log_message "Rebooting system..."
+reboot
